@@ -17,13 +17,16 @@ import { EditorAccessor, IGrammarContributions } from 'vs/workbench/parts/emmet/
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
 import { IExtensionService, ExtensionPointContribution } from 'vs/platform/extensions/common/extensions';
 import * as emmet from 'emmet';
+import * as path from 'path';
+import * as fs from 'fs';
 
 interface IEmmetConfiguration {
 	emmet: {
 		preferences: any;
 		syntaxProfiles: any;
 		triggerExpansionOnTab: boolean,
-		excludeLanguages: string[]
+		excludeLanguages: string[],
+		extensionsPath: string
 	};
 }
 
@@ -88,17 +91,36 @@ class LazyEmmet {
 
 	private updateEmmetPreferences(configurationService: IConfigurationService, _emmet: typeof emmet) {
 		let emmetPreferences = configurationService.getConfiguration<IEmmetConfiguration>().emmet;
+		let syntaxProfiles = this.getEmmetCustomizations(emmetPreferences.extensionsPath, 'syntaxProfiles.json', emmetPreferences.syntaxProfiles);
+		let preferences = this.getEmmetCustomizations(emmetPreferences.extensionsPath, 'preferences.json', emmetPreferences.preferences);
+		let snippets = this.getEmmetCustomizations(emmetPreferences.extensionsPath, 'snippets.json', {});
+
 		try {
-			_emmet.loadPreferences(emmetPreferences.preferences);
-			_emmet.loadProfiles(emmetPreferences.syntaxProfiles);
+			_emmet.loadPreferences(preferences);
+			_emmet.loadProfiles(syntaxProfiles);
+			_emmet.loadSnippets(snippets);
 		} catch (err) {
 			// ignore
 		}
 	}
 
-	private resetEmmetPreferences(configurationService: IConfigurationService, _emmet: typeof emmet) {
-		_emmet.preferences.reset();
-		_emmet.profile.reset();
+	private getEmmetCustomizations(basePath: string, fileName: string, dataFromConfig: any): any {
+		try {
+			let extensionsPath = path.join(basePath, fileName);
+			if (fs.statSync(extensionsPath).isFile()) {
+				let data = JSON.parse(fs.readFileSync(extensionsPath).toString());
+				for (var key in dataFromConfig) {
+					if (dataFromConfig.hasOwnProperty(key)) {
+						data[key] = dataFromConfig[key];
+					}
+				}
+				return data;
+			}
+		} catch (err) {
+			// either basePath is empty, or file does not exist or file does not have valid json
+		}
+
+		return dataFromConfig;
 	}
 
 	private _withEmmetPreferences(configurationService: IConfigurationService, _emmet: typeof emmet, callback: (_emmet: typeof emmet) => void): void {
@@ -106,7 +128,7 @@ class LazyEmmet {
 			this.updateEmmetPreferences(configurationService, _emmet);
 			callback(_emmet);
 		} finally {
-			this.resetEmmetPreferences(configurationService, _emmet);
+			_emmet.resetUserData();
 		}
 	}
 }
